@@ -1,0 +1,359 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ExcelService = void 0;
+const XLSX = __importStar(require("xlsx"));
+const clientMappingService_1 = require("./clientMappingService");
+class ExcelService {
+    constructor() {
+        this.clientService = new clientMappingService_1.ClientMappingService();
+    }
+    processOrderFile(buffer) {
+        try {
+            console.log('=== INICIANDO PROCESSAMENTO DE PEDIDOS ===');
+            console.log('Tamanho do buffer:', buffer.length);
+            const workbook = XLSX.read(buffer);
+            console.log('Planilhas encontradas:', workbook.SheetNames);
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+            console.log('Range da planilha:', worksheet['!ref']);
+            // Vamos primeiro ler tudo para ver o que temos
+            const allRows = XLSX.utils.sheet_to_json(worksheet, {
+                raw: false,
+                header: 1,
+                defval: ''
+            });
+            console.log('Total de linhas:', allRows.length);
+            console.log('Primeiras 10 linhas:', allRows.slice(0, 10));
+            // Vamos identificar onde está o cabeçalho
+            let headerRowIndex = -1;
+            for (let i = 0; i < Math.min(10, allRows.length); i++) {
+                const row = allRows[i];
+                console.log(`Linha ${i + 1}:`, row);
+                // Procurar por "Material" no cabeçalho
+                if (row.some(cell => cell && cell.toString().toLowerCase().includes('material'))) {
+                    headerRowIndex = i;
+                    console.log(`CABEÇALHO ENCONTRADO NA LINHA ${i + 1}:`, row);
+                    break;
+                }
+            }
+            if (headerRowIndex === -1) {
+                console.error('Cabeçalho não encontrado!');
+                return [];
+            }
+            // Processar dados a partir da linha após o cabeçalho
+            const dataRows = allRows.slice(headerRowIndex + 1);
+            const headerRow = allRows[headerRowIndex];
+            console.log('Linhas de dados:', dataRows.length);
+            console.log('Header:', headerRow);
+            // Encontrar índices das colunas importantes
+            const materialIndex = headerRow.findIndex(h => h && h.toString().toLowerCase().includes('material'));
+            const qtdPlanIndex = headerRow.findIndex(h => h && h.toString().toLowerCase().includes('qtd plan'));
+            const uomIndex = headerRow.findIndex(h => h && h.toString().toLowerCase().includes('uom'));
+            const unidadeIndex = headerRow.findIndex(h => h && h.toString().toLowerCase().includes('unidade'));
+            const clienteIndex = headerRow.findIndex(h => h && h.toString().toLowerCase().includes('cliente'));
+            const planejadaIndex = headerRow.findIndex(h => h && h.toString().toLowerCase().includes('planeada'));
+            const observacoesIndex = headerRow.findIndex(h => h && h.toString().toLowerCase().includes('observ'));
+            console.log('Índices encontrados:', {
+                material: materialIndex,
+                qtdPlan: qtdPlanIndex,
+                uom: uomIndex,
+                unidade: unidadeIndex,
+                cliente: clienteIndex,
+                planeada: planejadaIndex,
+                observacoes: observacoesIndex
+            });
+            const processedOrders = dataRows.map((row, index) => {
+                if (!Array.isArray(row))
+                    return null;
+                const material = row[materialIndex] || '';
+                const qtdPlan = row[qtdPlanIndex] || '0';
+                const uom = row[uomIndex] || '';
+                const unidade = row[unidadeIndex] || '';
+                const cliente = row[clienteIndex] || '';
+                const planeada = row[planejadaIndex] || '';
+                const observacoes = row[observacoesIndex] || '';
+                if (!material || material.toString().trim() === '') {
+                    return null;
+                }
+                // Extrair código (primeiros 8 caracteres) e descrição
+                const materialStr = material.toString();
+                const code = materialStr.substring(0, 8).trim();
+                const description = materialStr.includes(' - ')
+                    ? materialStr.split(' - ').slice(1).join(' - ').trim()
+                    : materialStr.substring(8).trim();
+                // Converter quantidade
+                const quantity = parseFloat(qtdPlan.toString().replace(',', '.')) || 0;
+                const result = {
+                    code,
+                    material: description,
+                    quantity,
+                    uom: uom.toString(),
+                    sector: unidade.toString(),
+                    client: cliente.toString(),
+                    plannedDate: planeada.toString(),
+                    observations: observacoes.toString(),
+                    isNextDay: observacoes.toString().includes('D+1')
+                };
+                if (index < 5) {
+                    console.log(`Pedido ${index + 1}:`, result);
+                }
+                return result;
+            }).filter(Boolean);
+            console.log(`=== PEDIDOS PROCESSADOS: ${processedOrders.length} ===`);
+            return processedOrders;
+        }
+        catch (error) {
+            console.error('Erro ao processar arquivo de pedidos:', error);
+            throw error;
+        }
+    }
+    processStockFile(buffer) {
+        try {
+            console.log('=== INICIANDO PROCESSAMENTO DE ESTOQUE ===');
+            console.log('Tamanho do buffer:', buffer.length);
+            const workbook = XLSX.read(buffer);
+            console.log('Planilhas encontradas:', workbook.SheetNames);
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+            console.log('Range da planilha:', worksheet['!ref']);
+            // Ler todas as linhas primeiro
+            const allRows = XLSX.utils.sheet_to_json(worksheet, {
+                raw: false,
+                header: 1,
+                defval: ''
+            });
+            console.log('Total de linhas:', allRows.length);
+            console.log('Primeiras 10 linhas:', allRows.slice(0, 10));
+            // Procurar pelo cabeçalho
+            let headerRowIndex = -1;
+            for (let i = 0; i < Math.min(10, allRows.length); i++) {
+                const row = allRows[i];
+                console.log(`Linha ${i + 1}:`, row);
+                if (row.some(cell => cell && (cell.toString().toLowerCase().includes('nº') ||
+                    cell.toString().toLowerCase().includes('código') ||
+                    cell.toString().toLowerCase().includes('inventário')))) {
+                    headerRowIndex = i;
+                    console.log(`CABEÇALHO ENCONTRADO NA LINHA ${i + 1}:`, row);
+                    break;
+                }
+            }
+            if (headerRowIndex === -1) {
+                console.error('Cabeçalho de estoque não encontrado!');
+                return [];
+            }
+            const dataRows = allRows.slice(headerRowIndex + 1);
+            const headerRow = allRows[headerRowIndex];
+            // Encontrar índices das colunas
+            const codigoIndex = headerRow.findIndex(h => h && (h.toString().toLowerCase().includes('nº') ||
+                h.toString().toLowerCase().includes('código')));
+            const descricaoIndex = headerRow.findIndex(h => h && h.toString().toLowerCase().includes('descrição'));
+            const inventarioIndex = headerRow.findIndex(h => h && h.toString().toLowerCase().includes('inventário'));
+            const classeIndex = headerRow.findIndex(h => h && h.toString().toLowerCase().includes('classe'));
+            console.log('Índices encontrados:', {
+                codigo: codigoIndex,
+                descricao: descricaoIndex,
+                inventario: inventarioIndex,
+                classe: classeIndex
+            });
+            const processedStock = dataRows.map((row, index) => {
+                if (!Array.isArray(row))
+                    return null;
+                const codigo = row[codigoIndex] || '';
+                const descricao = row[descricaoIndex] || '';
+                const inventario = row[inventarioIndex] || '0';
+                const classe = row[classeIndex] || '';
+                if (!codigo || codigo.toString().trim() === '') {
+                    return null;
+                }
+                const inventory = parseFloat(inventario.toString().replace(',', '.')) || 0;
+                const result = {
+                    code: codigo.toString().trim(),
+                    description: descricao.toString(),
+                    inventory,
+                    storageClass: this.mapStorageClass(classe.toString())
+                };
+                if (index < 5) {
+                    console.log(`Estoque ${index + 1}:`, result);
+                }
+                return result;
+            }).filter(Boolean);
+            console.log(`=== ESTOQUE PROCESSADO: ${processedStock.length} ===`);
+            return processedStock;
+        }
+        catch (error) {
+            console.error('Erro ao processar arquivo de estoque:', error);
+            throw error;
+        }
+    }
+    processFiles(orderBuffer, stockBuffer) {
+        console.log('=== INICIANDO PROCESSAMENTO COMPLETO ===');
+        const orders = this.processOrderFile(orderBuffer);
+        const stock = this.processStockFile(stockBuffer);
+        console.log(`Pedidos processados: ${orders.length}`);
+        console.log(`Estoque processado: ${stock.length}`);
+        if (orders.length === 0) {
+            console.error('NENHUM PEDIDO FOI PROCESSADO!');
+            return [];
+        }
+        if (stock.length === 0) {
+            console.error('NENHUM ITEM DE ESTOQUE FOI PROCESSADO!');
+        }
+        // Agrupar pedidos por código + setor + cliente
+        const groupedOrders = {};
+        orders.forEach((order, index) => {
+            console.log(`Processando pedido ${index + 1}:`, {
+                code: order.code,
+                material: order.material,
+                quantity: order.quantity,
+                sector: order.sector,
+                client: order.client
+            });
+            // Chave única por código + setor + cliente
+            const key = `${order.code}_${order.sector}_${order.client}`;
+            if (!groupedOrders[key]) {
+                const stockItem = stock.find(s => s.code === order.code);
+                const clientInfo = this.clientService.getClientBySigla(order.client);
+                // Extrair data e hora do campo plannedDate
+                const plannedDateTime = this.extractDateTimeInfo(order.plannedDate);
+                // Se não há descrição no pedido, buscar no estoque
+                let materialDescription = order.material;
+                if (!materialDescription || materialDescription.trim() === '') {
+                    materialDescription = (stockItem === null || stockItem === void 0 ? void 0 : stockItem.description) || order.code;
+                }
+                groupedOrders[key] = {
+                    code: order.code,
+                    material: materialDescription,
+                    plannedQty: 0,
+                    executedQty: '',
+                    uom: order.uom,
+                    department: this.clientService.mapDepartment((stockItem === null || stockItem === void 0 ? void 0 : stockItem.storageClass) || 'N/A'),
+                    stockPhoto: (stockItem === null || stockItem === void 0 ? void 0 : stockItem.inventory) || 0,
+                    sector: order.sector,
+                    client: order.client,
+                    clientCode: (clientInfo === null || clientInfo === void 0 ? void 0 : clientInfo.codigo) || `C${order.client}`,
+                    clientName: (clientInfo === null || clientInfo === void 0 ? void 0 : clientInfo.nome) || order.client,
+                    plannedDate: plannedDateTime.date,
+                    plannedHour: plannedDateTime.time,
+                    isNextDay: order.isNextDay
+                };
+                console.log(`Novo item criado para ${key}:`, groupedOrders[key]);
+            }
+            groupedOrders[key].plannedQty += order.quantity;
+        });
+        const result = Object.values(groupedOrders);
+        console.log(`=== RELATÓRIO FINAL GERADO: ${result.length} itens ===`);
+        // Mostrar alguns exemplos do resultado
+        result.slice(0, 3).forEach((item, index) => {
+            console.log(`Resultado ${index + 1}:`, item);
+        });
+        return result;
+    }
+    extractDateTimeInfo(plannedDate) {
+        try {
+            // Formato esperado: "2025-06-01 13:30" ou similar
+            if (plannedDate.includes(' ')) {
+                const [datePart, timePart] = plannedDate.split(' ');
+                return {
+                    date: datePart,
+                    time: timePart
+                };
+            }
+            // Se não tem hora, retornar apenas a data
+            return {
+                date: plannedDate,
+                time: '00:00'
+            };
+        }
+        catch (error) {
+            console.warn('Erro ao processar data/hora:', plannedDate, error);
+            return {
+                date: plannedDate || new Date().toISOString().split('T')[0],
+                time: '00:00'
+            };
+        }
+    }
+    applyFilters(data, filters) {
+        let filteredData = [...data];
+        // Filtro por data
+        if (filters.date) {
+            const filterDate = filters.date.toISOString().split('T')[0];
+            filteredData = filteredData.filter(item => item.plannedDate.includes(filterDate));
+        }
+        // Filtro por hora
+        if (filters.hour) {
+            filteredData = filteredData.filter(item => item.plannedHour.includes(filters.hour));
+        }
+        // Filtro por clientes incluídos
+        if (filters.clients && filters.clients.length > 0) {
+            filteredData = filteredData.filter(item => filters.clients.includes(item.client));
+        }
+        // Filtro para excluir clientes
+        if (filters.excludedClients && filters.excludedClients.length > 0) {
+            filteredData = filteredData.filter(item => !filters.excludedClients.includes(item.client));
+        }
+        // Filtro por departamentos
+        if (filters.departments && filters.departments.length > 0) {
+            filteredData = filteredData.filter(item => filters.departments.includes(item.department));
+        }
+        // Filtro por setores
+        if (filters.sectors && filters.sectors.length > 0) {
+            filteredData = filteredData.filter(item => filters.sectors.includes(item.sector));
+        }
+        // Filtro D+1
+        if (filters.isNextDay !== undefined) {
+            filteredData = filteredData.filter(item => item.isNextDay === filters.isNextDay);
+        }
+        return filteredData;
+    }
+    getAvailableClients() {
+        return this.clientService.getAllClients();
+    }
+    getAvailableDepartments() {
+        return ['PRAÇA', 'Congelados', 'Refrigerados', 'Secos', 'Consumíveis', 'Cozinha Quente'];
+    }
+    generateReportTitle(sector, clients, date, hour) {
+        const dateStr = date.toLocaleDateString('pt-BR');
+        const hourStr = hour ? ` ${hour}` : '';
+        let clientStr = 'Geral';
+        if (clients.length === 1) {
+            const clientInfo = this.clientService.getClientBySigla(clients[0]);
+            clientStr = (clientInfo === null || clientInfo === void 0 ? void 0 : clientInfo.nome) || clients[0];
+        }
+        else if (clients.length > 1) {
+            clientStr = 'Geral';
+        }
+        return `${sector} ${clientStr} ${dateStr}${hourStr}`;
+    }
+    mapStorageClass(storageClass) {
+        const mapping = {
+            'C1': 'Congelados', 'C2': 'Congelados', 'C3': 'Congelados', 'C4': 'Congelados',
+            'P': 'PRAÇA', 'PRACA': 'PRAÇA', 'F&V, Pão & Iogurtes': 'PRAÇA', 'PRAÇA': 'PRAÇA',
+            'R': 'Refrigerados', 'R4': 'Refrigerados',
+            'S': 'Secos', 'Seco': 'Secos', 'Secos': 'Secos', 'AMB.': 'Secos',
+            'Secos / Consumíveis': 'Secos', 'CLI': 'Consumíveis'
+        };
+        return mapping[storageClass] || storageClass;
+    }
+}
+exports.ExcelService = ExcelService;
